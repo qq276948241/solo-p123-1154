@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type CreateAppointmentRequest struct {
@@ -46,15 +47,20 @@ func checkTimeConflict(doctorID uint, date, startTime, endTime string, excludeID
 
 func resolvePetInfo(c *gin.Context, req CreateAppointmentRequest, userID uint) (petID uint, petName string, petType string, ok bool) {
 	if req.PetID == 0 {
-		if req.PetName == "" && !common.Ensure(c, common.ErrPetNameRequired, http.StatusBadRequest) {
+		if req.PetName == "" {
+			common.Ensure(c, common.ErrPetNameRequired, http.StatusBadRequest)
 			return 0, "", "", false
 		}
 		return 0, req.PetName, req.PetType, true
 	}
 
 	var pet models.Pet
-	code := common.CheckOwned(req.PetID, userID, &pet, func() uint { return pet.OwnerID }, common.ErrPetNotFound, common.ErrPetNotOwned)
-	if !common.Ensure(c, code, http.StatusForbidden) {
+	if err := database.DB.First(&pet, req.PetID).Error; err != nil {
+		common.Ensure(c, common.ErrPetNotFound, http.StatusNotFound)
+		return 0, "", "", false
+	}
+	if pet.OwnerID != userID {
+		common.Ensure(c, common.ErrPetNotOwned, http.StatusForbidden)
 		return 0, "", "", false
 	}
 	return pet.ID, pet.Name, pet.Species, true
@@ -126,8 +132,17 @@ func CreateAppointment(c *gin.Context) {
 		tx.Rollback()
 		return
 	}
-	if !common.EnsureOK(c, tx.Model(&schedule).UpdateColumn("booked", schedule.Booked+1).Error, common.ErrDatabase) {
+
+	result := tx.Model(&models.Schedule{}).
+		Where("id = ? AND booked < max_slots", schedule.ID).
+		UpdateColumn("booked", gorm.Expr("booked + ?", 1))
+	if !common.EnsureOK(c, result.Error, common.ErrDatabase) {
 		tx.Rollback()
+		return
+	}
+	if result.RowsAffected == 0 {
+		tx.Rollback()
+		common.Ensure(c, common.ErrScheduleFull, http.StatusBadRequest)
 		return
 	}
 	tx.Commit()
@@ -299,15 +314,17 @@ func RejectAppointment(c *gin.Context) {
 
 	if err := tx.Save(&appointment).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
+		common.Ensure(c, common.ErrDatabase, http.StatusInternalServerError)
 		return
 	}
 
-	var schedule models.Schedule
-	if err := tx.First(&schedule, appointment.ScheduleID).Error; err == nil {
-		if schedule.Booked > 0 {
-			tx.Model(&schedule).UpdateColumn("booked", schedule.Booked-1)
-		}
+	result := tx.Model(&models.Schedule{}).
+		Where("id = ? AND booked > 0", appointment.ScheduleID).
+		UpdateColumn("booked", gorm.Expr("booked - ?", 1))
+	if result.Error != nil {
+		tx.Rollback()
+		common.Ensure(c, common.ErrDatabase, http.StatusInternalServerError)
+		return
 	}
 
 	tx.Commit()
@@ -348,15 +365,17 @@ func CancelAppointment(c *gin.Context) {
 
 	if err := tx.Save(&appointment).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
+		common.Ensure(c, common.ErrDatabase, http.StatusInternalServerError)
 		return
 	}
 
-	var schedule models.Schedule
-	if err := tx.First(&schedule, appointment.ScheduleID).Error; err == nil {
-		if schedule.Booked > 0 {
-			tx.Model(&schedule).UpdateColumn("booked", schedule.Booked-1)
-		}
+	result := tx.Model(&models.Schedule{}).
+		Where("id = ? AND booked > 0", appointment.ScheduleID).
+		UpdateColumn("booked", gorm.Expr("booked - ?", 1))
+	if result.Error != nil {
+		tx.Rollback()
+		common.Ensure(c, common.ErrDatabase, http.StatusInternalServerError)
+		return
 	}
 
 	tx.Commit()
