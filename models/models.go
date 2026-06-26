@@ -46,6 +46,19 @@ type Service struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type Pet struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	OwnerID   uint      `gorm:"index;not null" json:"owner_id"`
+	Name      string    `gorm:"size:50;not null" json:"name"`
+	Species   string    `gorm:"size:30;not null" json:"species"`
+	Age       int       `gorm:"default:0" json:"age"`
+	Gender    string    `gorm:"size:10" json:"gender"`
+	Breed     string    `gorm:"size:50" json:"breed"`
+	Note      string    `gorm:"type:text" json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Schedule struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	DoctorID  uint      `gorm:"index;not null" json:"doctor_id"`
@@ -75,6 +88,7 @@ type Appointment struct {
 	DoctorID    uint      `gorm:"index;not null" json:"doctor_id"`
 	ScheduleID  uint      `gorm:"index;not null" json:"schedule_id"`
 	ServiceID   uint      `gorm:"index;not null" json:"service_id"`
+	PetID       uint      `gorm:"index" json:"pet_id"`
 	PetName     string    `gorm:"size:50;not null" json:"pet_name"`
 	PetType     string    `gorm:"size:30" json:"pet_type"`
 	Date        string    `gorm:"size:10;index;not null" json:"date"`
@@ -89,5 +103,6 @@ type Appointment struct {
 	User     User     `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Doctor   Doctor   `gorm:"foreignKey:DoctorID" json:"doctor,omitempty"`
 	Service  Service  `gorm:"foreignKey:ServiceID" json:"service,omitempty"`
+	Pet      Pet      `gorm:"foreignKey:PetID" json:"pet,omitempty"`
 	Schedule Schedule `gorm:"foreignKey:ScheduleID" json:"schedule,omitempty"`
 }

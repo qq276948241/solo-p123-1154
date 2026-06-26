@@ -58,6 +58,16 @@ func SetupRouter() *gin.Engine {
 			}
 		}
 
+		pets := api.Group("/pets")
+		pets.Use(middleware.JWTAuth())
+		{
+			pets.POST("", handlers.CreatePet)
+			pets.GET("", handlers.GetMyPets)
+			pets.GET("/:id", handlers.GetPet)
+			pets.PUT("/:id", handlers.UpdatePet)
+			pets.DELETE("/:id", handlers.DeletePet)
+		}
+
 		schedules := api.Group("/schedules")
 		schedules.Use(middleware.JWTAuth())
 		{

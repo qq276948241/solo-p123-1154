@@ -14,7 +14,8 @@ type CreateAppointmentRequest struct {
 	DoctorID   uint   `json:"doctor_id" binding:"required"`
 	ScheduleID uint   `json:"schedule_id" binding:"required"`
 	ServiceID  uint   `json:"service_id" binding:"required"`
-	PetName    string `json:"pet_name" binding:"required"`
+	PetID      uint   `json:"pet_id"`
+	PetName    string `json:"pet_name"`
 	PetType    string `json:"pet_type"`
 	Note       string `json:"note"`
 }
@@ -51,6 +52,30 @@ func CreateAppointment(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("userID")
+
+	var petID uint
+	var petName, petType string
+	if req.PetID > 0 {
+		var pet models.Pet
+		if err := database.DB.First(&pet, req.PetID).Error; err != nil {
+			c.JSON(http.StatusBadRequest, common.ErrorResponseWithMsg(common.ErrNotFound, "宠物不存在"))
+			return
+		}
+		if pet.OwnerID != userID.(uint) {
+			c.JSON(http.StatusForbidden, common.ErrorResponseWithMsg(common.ErrForbidden, "只能预约自己名下的宠物"))
+			return
+		}
+		petID = pet.ID
+		petName = pet.Name
+		petType = pet.Species
+	} else {
+		if req.PetName == "" {
+			c.JSON(http.StatusBadRequest, common.ErrorResponseWithMsg(common.ErrInvalidParams, "宠物ID或宠物名字必填"))
+			return
+		}
+		petName = req.PetName
+		petType = req.PetType
+	}
 
 	var schedule models.Schedule
 	if err := database.DB.First(&schedule, req.ScheduleID).Error; err != nil {
@@ -94,8 +119,9 @@ func CreateAppointment(c *gin.Context) {
 		DoctorID:   req.DoctorID,
 		ScheduleID: req.ScheduleID,
 		ServiceID:  req.ServiceID,
-		PetName:    req.PetName,
-		PetType:    req.PetType,
+		PetID:      petID,
+		PetName:    petName,
+		PetType:    petType,
 		Date:       schedule.Date,
 		StartTime:  schedule.StartTime,
 		EndTime:    schedule.EndTime,
@@ -132,7 +158,7 @@ func GetAppointment(c *gin.Context) {
 	}
 
 	var appointment models.Appointment
-	if err := database.DB.Preload("User").Preload("Doctor").Preload("Service").
+	if err := database.DB.Preload("User").Preload("Doctor").Preload("Service").Preload("Pet").
 		First(&appointment, uint(id)).Error; err != nil {
 		c.JSON(http.StatusNotFound, common.ErrorResponse(common.ErrAppointmentNotFound))
 		return
@@ -151,7 +177,7 @@ func GetMyAppointments(c *gin.Context) {
 	}
 
 	var appointments []models.Appointment
-	if err := query.Preload("Doctor").Preload("Service").
+	if err := query.Preload("Doctor").Preload("Service").Preload("Pet").
 		Order("created_at DESC").Find(&appointments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
 		return
@@ -197,7 +223,7 @@ func GetDoctorAppointments(c *gin.Context) {
 	}
 
 	var appointments []models.Appointment
-	if err := query.Preload("User").Preload("Service").
+	if err := query.Preload("User").Preload("Service").Preload("Pet").
 		Order("date ASC, start_time ASC").Find(&appointments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
 		return
@@ -219,7 +245,7 @@ func GetAllAppointments(c *gin.Context) {
 	}
 
 	var appointments []models.Appointment
-	if err := query.Preload("User").Preload("Doctor").Preload("Service").
+	if err := query.Preload("User").Preload("Doctor").Preload("Service").Preload("Pet").
 		Order("created_at DESC").Find(&appointments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
 		return
