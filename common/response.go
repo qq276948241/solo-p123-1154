@@ -31,6 +31,12 @@ const (
 	ErrAppointmentNotFound ErrorCode = 40002
 	ErrAppointmentStatus   ErrorCode = 40003
 	ErrServiceNotFound     ErrorCode = 40004
+	ErrScheduleFull        ErrorCode = 40005
+	ErrScheduleMismatch    ErrorCode = 40006
+
+	ErrPetNotFound   ErrorCode = 50001
+	ErrPetNotOwned   ErrorCode = 50002
+	ErrPetNameRequired ErrorCode = 50003
 )
 
 var errorMessages = map[ErrorCode]string{
@@ -56,6 +62,12 @@ var errorMessages = map[ErrorCode]string{
 	ErrAppointmentNotFound: "预约不存在",
 	ErrAppointmentStatus:   "预约状态不允许此操作",
 	ErrServiceNotFound:     "服务项目不存在",
+	ErrScheduleFull:        "该时段预约已满",
+	ErrScheduleMismatch:    "排班与医生不匹配",
+
+	ErrPetNotFound:     "宠物不存在",
+	ErrPetNotOwned:     "只能预约自己名下的宠物",
+	ErrPetNameRequired: "宠物ID或宠物名字必填",
 }
 
 func (e ErrorCode) Message() string {

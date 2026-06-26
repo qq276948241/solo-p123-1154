@@ -44,78 +44,70 @@ func checkTimeConflict(doctorID uint, date, startTime, endTime string, excludeID
 	return count > 0, nil
 }
 
+func resolvePetInfo(c *gin.Context, req CreateAppointmentRequest, userID uint) (petID uint, petName string, petType string, ok bool) {
+	if req.PetID == 0 {
+		if req.PetName == "" && !common.Ensure(c, common.ErrPetNameRequired, http.StatusBadRequest) {
+			return 0, "", "", false
+		}
+		return 0, req.PetName, req.PetType, true
+	}
+
+	var pet models.Pet
+	code := common.CheckOwned(req.PetID, userID, &pet, func() uint { return pet.OwnerID }, common.ErrPetNotFound, common.ErrPetNotOwned)
+	if !common.Ensure(c, code, http.StatusForbidden) {
+		return 0, "", "", false
+	}
+	return pet.ID, pet.Name, pet.Species, true
+}
+
 func CreateAppointment(c *gin.Context) {
 	var req CreateAppointmentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, common.ErrorResponse(common.ErrInvalidParams))
+		common.Ensure(c, common.ErrInvalidParams, http.StatusBadRequest)
 		return
 	}
 
-	userID, _ := c.Get("userID")
+	userIDVal, _ := c.Get("userID")
+	userID := userIDVal.(uint)
 
-	var petID uint
-	var petName, petType string
-	if req.PetID > 0 {
-		var pet models.Pet
-		if err := database.DB.First(&pet, req.PetID).Error; err != nil {
-			c.JSON(http.StatusBadRequest, common.ErrorResponseWithMsg(common.ErrNotFound, "宠物不存在"))
-			return
-		}
-		if pet.OwnerID != userID.(uint) {
-			c.JSON(http.StatusForbidden, common.ErrorResponseWithMsg(common.ErrForbidden, "只能预约自己名下的宠物"))
-			return
-		}
-		petID = pet.ID
-		petName = pet.Name
-		petType = pet.Species
-	} else {
-		if req.PetName == "" {
-			c.JSON(http.StatusBadRequest, common.ErrorResponseWithMsg(common.ErrInvalidParams, "宠物ID或宠物名字必填"))
-			return
-		}
-		petName = req.PetName
-		petType = req.PetType
+	petID, petName, petType, ok := resolvePetInfo(c, req, userID)
+	if !ok {
+		return
 	}
 
 	var schedule models.Schedule
-	if err := database.DB.First(&schedule, req.ScheduleID).Error; err != nil {
-		c.JSON(http.StatusNotFound, common.ErrorResponse(common.ErrScheduleNotFound))
+	if !common.Ensure(c, common.CheckExists(req.ScheduleID, &schedule, common.ErrScheduleNotFound), http.StatusNotFound) {
 		return
 	}
-
 	if schedule.DoctorID != req.DoctorID {
-		c.JSON(http.StatusBadRequest, common.ErrorResponse(common.ErrInvalidParams))
+		common.Ensure(c, common.ErrScheduleMismatch, http.StatusBadRequest)
 		return
 	}
-
 	if !schedule.IsActive {
-		c.JSON(http.StatusBadRequest, common.ErrorResponse(common.ErrScheduleNotFound))
+		common.Ensure(c, common.ErrScheduleNotFound, http.StatusBadRequest)
 		return
 	}
-
 	if schedule.Booked >= schedule.MaxSlots {
-		c.JSON(http.StatusBadRequest, common.ErrorResponseWithMsg(common.ErrAppointmentConflict, "该时段预约已满"))
+		common.Ensure(c, common.ErrScheduleFull, http.StatusBadRequest)
 		return
 	}
 
 	var service models.Service
-	if err := database.DB.First(&service, req.ServiceID).Error; err != nil {
-		c.JSON(http.StatusNotFound, common.ErrorResponse(common.ErrServiceNotFound))
+	if !common.Ensure(c, common.CheckExists(req.ServiceID, &service, common.ErrServiceNotFound), http.StatusNotFound) {
 		return
 	}
 
 	conflict, err := checkTimeConflict(req.DoctorID, schedule.Date, schedule.StartTime, schedule.EndTime)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
+	if !common.EnsureOK(c, err, common.ErrDatabase) {
 		return
 	}
 	if conflict {
-		c.JSON(http.StatusBadRequest, common.ErrorResponse(common.ErrAppointmentConflict))
+		common.Ensure(c, common.ErrAppointmentConflict, http.StatusBadRequest)
 		return
 	}
 
 	appointment := models.Appointment{
-		UserID:     userID.(uint),
+		UserID:     userID,
 		DoctorID:   req.DoctorID,
 		ScheduleID: req.ScheduleID,
 		ServiceID:  req.ServiceID,
@@ -130,23 +122,17 @@ func CreateAppointment(c *gin.Context) {
 	}
 
 	tx := database.DB.Begin()
-
-	if err := tx.Create(&appointment).Error; err != nil {
+	if !common.EnsureOK(c, tx.Create(&appointment).Error, common.ErrDatabase) {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
 		return
 	}
-
-	if err := tx.Model(&schedule).UpdateColumn("booked", schedule.Booked+1).Error; err != nil {
+	if !common.EnsureOK(c, tx.Model(&schedule).UpdateColumn("booked", schedule.Booked+1).Error, common.ErrDatabase) {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, common.ErrorResponse(common.ErrDatabase))
 		return
 	}
-
 	tx.Commit()
 
 	database.InvalidateScheduleCache(req.DoctorID, schedule.Date)
-
 	c.JSON(http.StatusOK, common.SuccessResponse(appointment))
 }
 
